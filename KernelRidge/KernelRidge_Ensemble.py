@@ -1,5 +1,9 @@
 """
-RUN IN TERMINAL WITH: mpiexec -n 4 /usr/local/bin/python3 basic_krr_mpi.py
+RUN IN TERMINAL WITH: mpiexec -n 4 /usr/local/bin/python3 KernelRidge/KernelRidge_Ensemble.py
+Rank 2: Calculated gamma = 0.07570152051949894
+Rank 0: Calculated gamma = 0.08021492594913353
+Rank 3: Calculated gamma = 0.05985216566379412
+Rank 1: Calculated gamma = 0.07344571016012451
 Training RMSE: 16797.242683154138
 Test RMSE: 19656.63335409789
 """
@@ -18,7 +22,7 @@ def main():
     size = comm.Get_size()
 
     if rank == 0:
-        data = pd.read_csv('housing.tsv', sep='\t')
+        data = pd.read_csv('data/housing.tsv', sep='\t')
 
         data.columns = ['longitude', 'latitude', 'housingMedianAge', 'totalRooms',
               'totalBedrooms', 'population', 'households', 'medianIncome',
@@ -27,7 +31,6 @@ def main():
         X = data.drop(['medianHouseValue', 'oceanProximity'], axis=1)
         y = data['medianHouseValue']
         
-
         X = pd.get_dummies(data, columns=['oceanProximity'])
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
         
@@ -43,6 +46,12 @@ def main():
 
     chunk = comm.scatter(chunks, root=0)
     y_chunk = comm.scatter(y_chunks, root=0)
+
+    def calculate_gamma(X):
+        return 1 / (X.shape[1] * X.var())
+
+    gamma = calculate_gamma(chunk)
+    print(f"Rank {rank}: Calculated gamma = {gamma}")
 
     local_model = KernelRidge(alpha=1.0, kernel='rbf')
     local_model.fit(chunk, y_chunk)
