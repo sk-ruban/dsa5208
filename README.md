@@ -4,23 +4,23 @@ This project implements a parallel Kernel Ridge Regression algorithm using MPI (
 
 ## Environment Setup
 
-1. Ensure you have Python 3.x installed.
+1. Ensure you have Python 3 installed.
 2. Install the required packages:
 
 ```bash
-python -m pip install mpi4py pandas numpy scikit-learn
+python3 -m pip install mpi4py pandas numpy scikit-learn
 ```
 
 ## Dataset
 
-The project uses the California Housing dataset (`housing_20k.tsv`), which contains 20,000 samples. Each sample has 9 features and 1 target variable (median house value).
+The project uses a cropped California Housing dataset (`housing_20k.tsv`), which contains 20,000 samples. Each sample has 9 features and 1 target variable (median house value).
 
 ## Running the Main Script
 
 To run the main MPI Kernel Ridge Regression script:
 
 ```bash
-mpiexec -n 8 /usr/local/bin/python3 mpi-kernel.py
+mpiexec -n 8 /usr/local/bin/python3 mpi-final.py
 ```
 
 Note: The number after `-n` specifies the number of processes. Since we're using a dataset of 20,000 samples, choose a number that divides 20,000 evenly, such as 8 or 4.
@@ -44,7 +44,7 @@ Note: The number after `-n` specifies the number of processes. Since we're using
 
 ## Additional Scripts
 
-1. **Data Analysis**: There's a Jupyter notebook `data_analysis.ipynb` that contains initial data analysis. You can run this to get insights into the dataset.
+1. **Data Analysis**: There's a Jupyter notebook `data_analysis.ipynb` that contains initial data analysis.
 
 2. **Cross-Validation and Hyperparameter Testing**: Use the `mpi-cv.py` script for cross-validation and hyperparameter tuning:
 
@@ -65,15 +65,3 @@ After running the script, you'll see output including:
 - Kernel computation time
 - Conjugate gradient solver progress
 - Training and Test RMSE (Root Mean Square Error)
-
-## Notes
-
-- The project uses a conjugate gradient method to solve the linear system in Kernel Ridge Regression, which is particularly useful for large datasets.
-- The implementation includes various kernels and allows for easy switching between them.
-- Parallelization is achieved through MPI, which distributes the computation across multiple processes, potentially speeding up the calculation for large datasets.
-
-## Future Improvements
-
-- Implement more advanced hyperparameter tuning methods
-- Add support for larger datasets
-- Optimize MPI communication patterns for better scalability
