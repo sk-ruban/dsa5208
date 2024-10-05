@@ -1,8 +1,9 @@
 """
-FEATURE SELECTION + Y SCALAR
-Training RMSE: 51418.59457183596
-Test RMSE: 55209.21323340134
+Using sigma: 2.3, lambda: 0.03
+Training RMSE: 45312.82460090478
+Test RMSE: 52789.82433630656
 """
+
 import time
 import pandas as pd
 import numpy as np
@@ -21,7 +22,7 @@ def prepare_data():
     4. Splitting the data into train and test sets
     5. Standardizing the features
     """
-    # Load the data
+    # Load data
     data = pd.read_csv('data/housing_20k.tsv', sep='\t', header=None)
     data.columns = ['longitude', 'latitude', 'housingMedianAge', 'totalRooms',
                     'totalBedrooms', 'population', 'households', 'medianIncome',
@@ -33,7 +34,7 @@ def prepare_data():
     data['bedrooms_per_room'] = data['totalBedrooms'] / data['totalRooms']
     data['population_per_household'] = data['population'] / data['households']
     
-    # Log transform of some features
+    # Log transform some features
     data['medianIncome'] = np.log1p(data['medianIncome'])
     data['housingMedianAge'] = np.log1p(data['housingMedianAge'])
 
@@ -43,25 +44,19 @@ def prepare_data():
     # Convert ocean proximity to one-hot encoding
     X = pd.get_dummies(data.drop('medianHouseValue', axis=1), columns=['oceanProximity'])
     y = data['medianHouseValue']
-    # print(X.columns)
     
     # Split the data into training and test sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
     
     # Scale the features
-    feature_scaler = StandardScaler()
-    X_train_scaled = feature_scaler.fit_transform(X_train)
-    X_test_scaled = feature_scaler.transform(X_test)
-    
-    # Scale the target variable
-    target_scaler = StandardScaler()
-    y_train_scaled = target_scaler.fit_transform(y_train.values.reshape(-1, 1)).flatten()
-    y_test_scaled = target_scaler.transform(y_test.values.reshape(-1, 1)).flatten()
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
     
     return (X_train_scaled, X_test_scaled, 
-            y_train_scaled.astype(np.float64), 
-            y_test_scaled.astype(np.float64),
-            target_scaler)
+            y_train.astype(np.float64), 
+            y_test.astype(np.float64),
+            scaler)
 
 def gaussian_kernel(X1, X2, sigma):
     """Compute the Gaussian kernel matrix between X1 and X2"""
@@ -69,11 +64,12 @@ def gaussian_kernel(X1, X2, sigma):
     return np.exp(-dist_matrix / (2 * sigma**2))
 
 def conjugate_gradient(A, b, max_iter=1000, tol=1e-6):
-    x = np.zeros_like(b, dtype=float)  # Ensure float dtype
+    """Solve the linear system Ax = b using the Conjugate Gradient method"""
+    x = np.zeros_like(b, dtype=float) 
     r = b - A @ x
     p = r.copy()
     r_norm_sq = np.dot(r, r)
-    b_norm = np.linalg.norm(b)  # Compute the norm of b once
+    b_norm = np.linalg.norm(b)
 
     for iteration in range(max_iter):
         Ap = A @ p
@@ -81,7 +77,7 @@ def conjugate_gradient(A, b, max_iter=1000, tol=1e-6):
         x += alpha * p
         r -= alpha * Ap
         r_norm_sq_new = np.dot(r, r)
-        residual = np.sqrt(r_norm_sq_new) / b_norm  # Relative residual
+        residual = np.sqrt(r_norm_sq_new) / b_norm 
         # print(f"Iteration {iteration + 1}: Relative Residual = {residual}")
         if residual < tol:
             # print("Conjugate Gradient: Converged based on relative residual.")
@@ -93,6 +89,7 @@ def conjugate_gradient(A, b, max_iter=1000, tol=1e-6):
     return x
 
 def circular_kernel_computation(local_X, comm, sigma):
+    """Compute the Gaussian kernel matrix using a circular communication pattern in MPI."""
     size = comm.Get_size()
     rank = comm.Get_rank()
     n_local = local_X.shape[0]
@@ -177,16 +174,9 @@ def kernel_ridge_regression(X_train, y_train, X_test, y_test, sigma, lambda_reg,
         y_pred_train = K @ alpha
         y_pred_test = K_test @ alpha
 
-        y_pred_train = target_scaler.inverse_transform(y_pred_train.reshape(-1, 1)).flatten()
-        y_pred_test = target_scaler.inverse_transform(y_pred_test.reshape(-1, 1)).flatten()
-
         # Apply clipping after inverse transform
         y_pred_train = np.clip(y_pred_train, 0, 500001)
         y_pred_test = np.clip(y_pred_test, 0, 500001)
-
-        # Inverse transform true values
-        y_train_full = target_scaler.inverse_transform(y_train_full.reshape(-1, 1)).flatten()
-        y_test = target_scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
 
         rmse_train = sqrt(mean_squared_error(y_train_full, y_pred_train))
         rmse_test = sqrt(mean_squared_error(y_test, y_pred_test))
@@ -215,8 +205,8 @@ def main():
     y_test = comm.bcast(y_test, root=0)
     target_scaler = comm.bcast(target_scaler, root=0)
 
-    sigma = 2.0
-    lambda_reg = 0.7
+    sigma = 2.3
+    lambda_reg = 0.03
 
     if rank == 0:
         print(f"Using sigma: {sigma}, lambda: {lambda_reg}")
