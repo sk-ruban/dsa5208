@@ -57,7 +57,8 @@ mpiexec -n 8 /usr/local/bin/python3 mpi-cv.py
 - `mpi-final.py`: Main script for MPI Kernel Ridge Regression
 - `mpi-cv.py`: Script for cross-validation and hyperparameter tuning
 - `data_analysis.ipynb`: Jupyter notebook for initial data analysis
-- `data/housing_20k.tsv`: Dataset file
+- `data/housing_20k.tsv`: Cropped Dataset
+- `data/housing.tsv`: Original Dataset
 
 ## Results
 
