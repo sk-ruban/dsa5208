@@ -1,11 +1,13 @@
 from pyspark.sql import SparkSession
 from pyspark.ml.feature import VectorAssembler, StandardScaler, MinMaxScaler
-from pyspark.ml.regression import RandomForestRegressor, LinearRegression
+from pyspark.ml.regression import RandomForestRegressor, LinearRegression, GBTRegressor
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.sql.functions import col, split, count, when, input_file_name, lit
 from pyspark.sql.types import *
 from pyspark.ml import Pipeline
 from pyspark.ml.stat import Summarizer
+import numpy as np
 import sys
 
 # Reduced logging
@@ -31,12 +33,12 @@ def load_and_preprocess_data():
                    .load("gs://dsa5208-weather/extracted/*.csv") \
                    .select("path") \
                    .orderBy("path") \
-                   .limit(20)
+                   .limit(1000)
 
     file_paths = [row.path for row in files_df.collect()]
-    print("\nSelected files:")
-    for path in file_paths:
-        print(path)
+    # print("\nSelected files:")
+    # for path in file_paths:
+    #     print(path)
 
     print("\nReading selected columns from files...")
     selected_columns = ["LATITUDE", "LONGITUDE", "ELEVATION",
@@ -51,11 +53,11 @@ def load_and_preprocess_data():
     print(f"\nInitial row count: {initial_count}")
 
     # Show data sample
-    print("\nSample of raw data before parsing:")
-    df.show(20, truncate=False)
+    # print("\nSample of raw data before parsing:")
+    # df.show(20, truncate=False)
 
-    print("\nDataframe schema:")
-    df.printSchema()
+    # print("\nDataframe schema:")
+    # df.printSchema()
 
     print("\nParsing columns...")
     df_parsed = df.select(
@@ -147,8 +149,8 @@ def load_and_preprocess_data():
     return df_filtered
 
 def prepare_features(df):
-    """Prepare feature vector for ML"""
-    print("Preparing features...")
+    """Prepare feature vectors with different scaling methods"""
+    print("Preparing features with different scaling methods...")
 
     assembler = VectorAssembler(
         inputCols=[
@@ -160,104 +162,158 @@ def prepare_features(df):
         outputCol="assembled_features"
     )
 
-    # Create assembled DataFrame first
     assembled_df = assembler.transform(df)
 
-    # StandardScaler (normalize to mean=0, std=1)
-    scaler = StandardScaler(
+    standard_scaler = StandardScaler(
         inputCol="assembled_features",
-        outputCol="features",
+        outputCol="standard_scaled_features",
         withStd=True,
         withMean=True
     )
 
-    # MinMaxScaler (scale to range [0,1])
-    # scaler = MinMaxScaler(
-    #     inputCol="assembled_features",
-    #     outputCol="features",
-    #     min=0.0,
-    #     max=1.0
-    # )
+    minmax_scaler = MinMaxScaler(
+        inputCol="assembled_features",
+        outputCol="minmax_scaled_features",
+        min=0.0,
+        max=1.0
+    )
 
-    scaler_model = scaler.fit(assembled_df)
-    scaled_df = scaler_model.transform(assembled_df)
+    standard_model = standard_scaler.fit(assembled_df)
+    minmax_model = minmax_scaler.fit(assembled_df)
+    scaled_df = standard_model.transform(assembled_df)
+    scaled_df = minmax_model.transform(scaled_df)
+    scaled_df = scaled_df.withColumnRenamed("assembled_features", "unscaled_features")
 
-    # Drop the intermediate column if you want
-    scaled_df = scaled_df.drop("assembled_features")
+    # Print statistics for each scaling method
+    # for feature_col in ["unscaled_features", "standard_scaled_features", "minmax_scaled_features"]:
+    #     summary = scaled_df.select(
+    #         Summarizer.metrics("mean", "std", "min", "max")
+    #         .summary(col(feature_col))
+    #         .alias("summary")
+    #     ).collect()
+
+    #     stats = summary[0]["summary"]
+    #     print(f"\nStatistics for {feature_col}:")
+    #     print(f"Mean: {stats['mean']}")
+    #     print(f"StdDev: {stats['std']}")
+    #     print(f"Min: {stats['min']}")
+    #     print(f"Max: {stats['max']}")
 
     return scaled_df, assembler.getInputCols()
 
 def train_and_evaluate(scaled_df, feature_names):
-    print_progress("Training and evaluating models...")
+    """Train and evaluate models using different scaling methods with proper regularization"""
+    print("\nStarting model training and evaluation...")
 
-    # Compute summary statistics for the 'features' vector column
-    summary = scaled_df.select(Summarizer.metrics("mean", "std").summary(scaled_df.features).alias("summary")).collect()
-    mean_values = summary[0]["summary"]["mean"]
-    stddev_values = summary[0]["summary"]["std"]
-
-    # Display the mean and standard deviation for each feature
-    print("\nScaled Features Statistics:")
-    for name, mean, stddev in zip(feature_names, mean_values, stddev_values):
-        print(f"Feature '{name}': Mean = {mean:.4f}, StdDev = {stddev:.4f}")
-
+    # Split data
     train_data, test_data = scaled_df.randomSplit([0.7, 0.3], seed=42)
-    print(f"\nTraining set size: {train_data.count()}")
+    print(f"Training set size: {train_data.count()}")
     print(f"Test set size: {test_data.count()}")
-
-    # Random Forest
-    rf = RandomForestRegressor(
-        featuresCol="features",
-        labelCol="sea_level_pressure",
-        numTrees=100,
-        maxDepth=10,
-        seed=42
-    )
-    rf_model = rf.fit(train_data)
-
-    # Linear Regression
-    lr = LinearRegression(
-        featuresCol="features",
-        labelCol="sea_level_pressure",
-        maxIter=100
-    )
-    lr_model = lr.fit(train_data)
 
     evaluator = RegressionEvaluator(
         labelCol="sea_level_pressure",
         predictionCol="prediction"
     )
 
-    # Random Forest evaluation
-    rf_predictions = rf_model.transform(test_data)
-    rf_rmse = evaluator.setMetricName("rmse").evaluate(rf_predictions)
-    rf_r2 = evaluator.setMetricName("r2").evaluate(rf_predictions)
-    rf_mae = evaluator.setMetricName("mae").evaluate(rf_predictions)
+    models = {
+        "Linear Regression": (
+            LinearRegression(standardization=False),
+            ParamGridBuilder()
+                .addGrid(LinearRegression.regParam, [0.01, 0.1, 1.0])
+                .addGrid(LinearRegression.elasticNetParam, [0.0, 0.5, 1.0])
+                .build()
+        ),
 
-    print("\nRandom Forest Performance:")
-    print(f"RMSE: {rf_rmse:.4f}")
-    print(f"MAE: {rf_mae:.4f}")
-    print(f"R2: {rf_r2:.4f}")
+        "Random Forest": (
+            RandomForestRegressor(),
+            ParamGridBuilder()
+                .addGrid(RandomForestRegressor.numTrees, [20, 40, 60])
+                .addGrid(RandomForestRegressor.maxDepth, [4, 8, 12])
+                .build()
+        ),
 
-    if hasattr(rf_model, 'featureImportances'):
-        importances = rf_model.featureImportances
-        print("\nFeature Importances:")
-        for name, importance in zip(feature_names, importances):
-            print(f"{name}: {importance:.4f}")
+        "Gradient Boosted Trees": (
+            GBTRegressor(),
+            ParamGridBuilder()
+                .addGrid(GBTRegressor.maxDepth, [4, 8])
+                .addGrid(GBTRegressor.maxIter, [20, 40])
+                .build()
+        )
+    }
 
-    # Linear Regression evaluation
-    lr_predictions = lr_model.transform(test_data)
-    lr_rmse = evaluator.setMetricName("rmse").evaluate(lr_predictions)
-    lr_r2 = evaluator.setMetricName("r2").evaluate(lr_predictions)
-    lr_mae = evaluator.setMetricName("mae").evaluate(lr_predictions)
+    for features_col in ["unscaled_features", "standard_scaled_features", "minmax_scaled_features"]:
+        print(f"\nEvaluating with {features_col}")
 
-    print("\nLinear Regression Performance:")
-    print(f"RMSE: {lr_rmse:.4f}")
-    print(f"MAE: {lr_mae:.4f}")
-    print(f"R2: {lr_r2:.4f}")
+        for model_name, (model, param_grid) in models.items():
+            print(f"\nTraining {model_name}...")
+
+            model.setFeaturesCol(features_col)
+            model.setLabelCol("sea_level_pressure")
+
+            cv = CrossValidator(
+                estimator=model,
+                estimatorParamMaps=param_grid,
+                evaluator=evaluator,
+                numFolds=3
+            )
+
+            cv_model = cv.fit(train_data)
+            best_model = cv_model.bestModel
+
+            train_predictions = best_model.transform(train_data)
+            test_predictions = best_model.transform(test_data)
+
+            evaluator.setMetricName("rmse")
+            train_rmse = evaluator.evaluate(train_predictions)
+            test_rmse = evaluator.evaluate(test_predictions)
+
+            evaluator.setMetricName("r2")
+            test_r2 = evaluator.evaluate(test_predictions)
+
+            evaluator.setMetricName("mae")
+            test_mae = evaluator.evaluate(test_predictions)
+
+            # Print results
+            print(f"\n{model_name} Results:")
+            print(f"Train RMSE: {train_rmse:.4f}")
+            print(f"Test RMSE: {test_rmse:.4f}")
+            print(f"Test R2: {test_r2:.4f}")
+            print(f"Test MAE: {test_mae:.4f}")
+
+            # Print best parameters
+            if model_name == "Linear Regression":
+                print(f"\nBest Parameters:")
+                print(f"regParam: {best_model.getRegParam()}")
+                print(f"elasticNetParam: {best_model.getElasticNetParam()}")
+
+                coefficients = best_model.coefficients.toArray()
+                if features_col in ["standard_scaled_features", "minmax_scaled_features"]:
+                    print("\nTop 5 most important features by absolute coefficient value:")
+                    coef_pairs = [(name, coef) for name, coef in zip(feature_names, coefficients)]
+                    sorted_coefs = sorted(coef_pairs, key=lambda x: abs(x[1]), reverse=True)
+                    for name, coef in sorted_coefs[:5]:
+                        print(f"{name}: {coef:.4f}")
+
+            elif model_name in ["Random Forest", "Gradient Boosted Trees"]:
+                print(f"\nBest Parameters:")
+                if model_name == "Random Forest":
+                    print(f"numTrees: {best_model.numTrees}")
+                    print(f"maxDepth: {best_model.maxDepth}")
+                else:
+                    print(f"maxDepth: {best_model.maxDepth}")
+                    print(f"maxIter: {best_model.maxIter}")
+
+                # Feature Importance
+                if hasattr(best_model, 'featureImportances'):
+                    print("\nTop 5 features by importance:")
+                    importances = best_model.featureImportances
+                    feature_imp = [(feat, float(imp)) for feat, imp in zip(feature_names, importances)]
+                    sorted_imp = sorted(feature_imp, key=lambda x: x[1], reverse=True)[:5]
+                    for feat, imp in sorted_imp:
+                        print(f"{feat}: {imp:.4f}")
 
 def main():
     print("Starting weather prediction model...")
-
     df = load_and_preprocess_data()
     scaled_df, feature_names = prepare_features(df)
     train_and_evaluate(scaled_df, feature_names)
