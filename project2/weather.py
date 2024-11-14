@@ -1,9 +1,11 @@
 from pyspark.sql import SparkSession
-from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import VectorAssembler, StandardScaler, MinMaxScaler
 from pyspark.ml.regression import RandomForestRegressor, LinearRegression
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.sql.functions import col, split, count, when, input_file_name, lit
 from pyspark.sql.types import *
+from pyspark.ml import Pipeline
+from pyspark.ml.stat import Summarizer
 import sys
 
 # Reduced logging
@@ -136,7 +138,7 @@ def load_and_preprocess_data():
         (col("visibility").between(0, 160000)) &
         (col("air_temp").between(-932, 618)) &
         (col("dew_point").between(-982, 368)) &
-        (col("sea_level_pressure").between(8600, 10900))
+        (col("sea_level_pressure").between(8600, 10900)) # Should delete?
     )
 
     final_count = df_filtered.count()
@@ -155,20 +157,54 @@ def prepare_features(df):
             "ceiling_height", "visibility",
             "air_temp", "dew_point"
         ],
-        outputCol="features"
+        outputCol="assembled_features"
     )
 
-    return assembler.transform(df)
+    # Create assembled DataFrame first
+    assembled_df = assembler.transform(df)
 
-def train_and_evaluate(df):
+    # StandardScaler (normalize to mean=0, std=1)
+    scaler = StandardScaler(
+        inputCol="assembled_features",
+        outputCol="features",
+        withStd=True,
+        withMean=True
+    )
+
+    # MinMaxScaler (scale to range [0,1])
+    # scaler = MinMaxScaler(
+    #     inputCol="assembled_features",
+    #     outputCol="features",
+    #     min=0.0,
+    #     max=1.0
+    # )
+
+    scaler_model = scaler.fit(assembled_df)
+    scaled_df = scaler_model.transform(assembled_df)
+
+    # Drop the intermediate column if you want
+    scaled_df = scaled_df.drop("assembled_features")
+
+    return scaled_df, assembler.getInputCols()
+
+def train_and_evaluate(scaled_df, feature_names):
     print_progress("Training and evaluating models...")
 
-    # Split data
-    train_data, test_data = df.randomSplit([0.7, 0.3], seed=42)
+    # Compute summary statistics for the 'features' vector column
+    summary = scaled_df.select(Summarizer.metrics("mean", "std").summary(scaled_df.features).alias("summary")).collect()
+    mean_values = summary[0]["summary"]["mean"]
+    stddev_values = summary[0]["summary"]["std"]
+
+    # Display the mean and standard deviation for each feature
+    print("\nScaled Features Statistics:")
+    for name, mean, stddev in zip(feature_names, mean_values, stddev_values):
+        print(f"Feature '{name}': Mean = {mean:.4f}, StdDev = {stddev:.4f}")
+
+    train_data, test_data = scaled_df.randomSplit([0.7, 0.3], seed=42)
     print(f"\nTraining set size: {train_data.count()}")
     print(f"Test set size: {test_data.count()}")
 
-    # Train Random Forest
+    # Random Forest
     rf = RandomForestRegressor(
         featuresCol="features",
         labelCol="sea_level_pressure",
@@ -178,7 +214,7 @@ def train_and_evaluate(df):
     )
     rf_model = rf.fit(train_data)
 
-    # Train Linear Regression
+    # Linear Regression
     lr = LinearRegression(
         featuresCol="features",
         labelCol="sea_level_pressure",
@@ -186,8 +222,10 @@ def train_and_evaluate(df):
     )
     lr_model = lr.fit(train_data)
 
-    # Evaluate models
-    evaluator = RegressionEvaluator(labelCol="sea_level_pressure", predictionCol="prediction")
+    evaluator = RegressionEvaluator(
+        labelCol="sea_level_pressure",
+        predictionCol="prediction"
+    )
 
     # Random Forest evaluation
     rf_predictions = rf_model.transform(test_data)
@@ -199,6 +237,12 @@ def train_and_evaluate(df):
     print(f"RMSE: {rf_rmse:.4f}")
     print(f"MAE: {rf_mae:.4f}")
     print(f"R2: {rf_r2:.4f}")
+
+    if hasattr(rf_model, 'featureImportances'):
+        importances = rf_model.featureImportances
+        print("\nFeature Importances:")
+        for name, importance in zip(feature_names, importances):
+            print(f"{name}: {importance:.4f}")
 
     # Linear Regression evaluation
     lr_predictions = lr_model.transform(test_data)
@@ -214,15 +258,9 @@ def train_and_evaluate(df):
 def main():
     print("Starting weather prediction model...")
 
-    # Load and preprocess data
     df = load_and_preprocess_data()
-
-    # Prepare features
-    df_prepared = prepare_features(df)
-
-    # Train and evaluate models
-    train_and_evaluate(df_prepared)
-
+    scaled_df, feature_names = prepare_features(df)
+    train_and_evaluate(scaled_df, feature_names)
     print("\nProcessing complete!")
     spark.stop()
 
