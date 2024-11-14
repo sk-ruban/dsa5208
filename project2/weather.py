@@ -7,57 +7,53 @@ from pyspark.sql.functions import col, split, count, when, input_file_name, lit
 from pyspark.sql.types import *
 from pyspark.ml import Pipeline
 from pyspark.ml.stat import Summarizer
-import numpy as np
 import sys
 
-# Reduced logging
+# Reduce logging
 spark = SparkSession.builder \
     .appName("Weather Pressure Prediction") \
     .config("spark.ui.showConsoleProgress", "false") \
     .getOrCreate()
-
 spark.sparkContext.setLogLevel("WARN")
-
-def print_progress(message):
-    """Print progress message on same line"""
-    sys.stdout.write(f"\r{message}")
-    sys.stdout.flush()
 
 def load_and_preprocess_data():
     """
     Returns cleaned DataFrame with necessary features
     """
     print("Starting data preprocessing...")
-    print("\nGetting file list...")
-    files_df = spark.read.format("binaryFile") \
-                   .load("gs://dsa5208-weather/extracted/*.csv") \
-                   .select("path") \
-                   .orderBy("path") \
-                   .limit(1000)
 
-    file_paths = [row.path for row in files_df.collect()]
-    # print("\nSelected files:")
-    # for path in file_paths:
-    #     print(path)
+    # USE ONLY IF YOU WANT A SAMPLE (eg. 1000 files) AND COMMENT OUT THE NEXT 3 LINES
+    files = spark.sparkContext.binaryFiles("gs://dsa5208-weather/extracted/*.csv") \
+                    .map(lambda x: x[0]) \
+                    .takeSample(False, 1000, seed=42)
 
-    print("\nReading selected columns from files...")
+    print(f"\nSelected {len(files)} files")
     selected_columns = ["LATITUDE", "LONGITUDE", "ELEVATION",
                        "WND", "CIG", "VIS", "TMP", "DEW", "SLP"]
 
-    df = spark.read.csv(file_paths,
+    df = spark.read.csv(files,
                        header=True,
                        inferSchema=True) \
-               .select(selected_columns)
+             .select(selected_columns)
+
+    # USE IF WANT TO MODEL ENTIRE DATASET
+    # df = spark.read.csv("gs://dsa5208-weather/extracted/*.csv",
+    #                     header=True,
+    #                     inferSchema=True)
+
+    # selected_columns = ["LATITUDE", "LONGITUDE", "ELEVATION",
+    #                    "WND", "CIG", "VIS", "TMP", "DEW", "SLP"]
+
+    # df = df.select([selected_columns]).cache()
 
     initial_count = df.count()
     print(f"\nInitial row count: {initial_count}")
 
-    # Show data sample
-    # print("\nSample of raw data before parsing:")
-    # df.show(20, truncate=False)
+    print("\nSample of raw data before parsing:")
+    df.show(20, truncate=False)
 
-    # print("\nDataframe schema:")
-    # df.printSchema()
+    print("\nDataframe schema:")
+    df.printSchema()
 
     print("\nParsing columns...")
     df_parsed = df.select(
@@ -115,20 +111,18 @@ def load_and_preprocess_data():
     print("\nSample of parsed data:")
     df_parsed.show(20)
 
-    # Print null counts for each column
     print("\nNull counts after parsing:")
     for column in df_parsed.columns:
         null_count = df_parsed.filter(col(column).isNull()).count()
         total = df_parsed.count()
         print(f"{column}: {null_count} nulls out of {total} ({(null_count/total)*100:.2f}%)")
 
-    # Remove rows with any null values
     print("\nRemoving rows with null values...")
     df_no_nulls = df_parsed.dropna()
+
     rows_after_null_removal = df_no_nulls.count()
     print(f"Rows remaining after null removal: {rows_after_null_removal}")
 
-    # Apply valid range filters based on documentation
     print("\nApplying valid range filters...")
     df_filtered = df_no_nulls.filter(
         (col("latitude").between(-90000, 90000)) &
@@ -140,7 +134,7 @@ def load_and_preprocess_data():
         (col("visibility").between(0, 160000)) &
         (col("air_temp").between(-932, 618)) &
         (col("dew_point").between(-982, 368)) &
-        (col("sea_level_pressure").between(8600, 10900)) # Should delete?
+        (col("sea_level_pressure").between(8600, 10900))
     )
 
     final_count = df_filtered.count()
@@ -149,55 +143,36 @@ def load_and_preprocess_data():
     return df_filtered
 
 def prepare_features(df):
-    """Prepare feature vectors with different scaling methods"""
-    print("Preparing features with different scaling methods...")
-
-    assembler = VectorAssembler(
-        inputCols=[
-            "latitude", "longitude", "elevation",
-            "wind_direction", "wind_speed",
-            "ceiling_height", "visibility",
-            "air_temp", "dew_point"
-        ],
-        outputCol="assembled_features"
+   """Prepare feature vectors with MinMax scaling"""
+   assembler = VectorAssembler(
+       inputCols=[
+           "latitude", "longitude", "elevation",
+           "wind_direction", "wind_speed",
+           "ceiling_height", "visibility",
+           "air_temp", "dew_point"
+       ],
+       outputCol="features"
     )
 
     assembled_df = assembler.transform(df)
 
-    standard_scaler = StandardScaler(
-        inputCol="assembled_features",
-        outputCol="standard_scaled_features",
-        withStd=True,
-        withMean=True
-    )
+    # YOU CAN USE STANDARD SCALAR TOO
+    # standard_scaler = StandardScaler(
+    #     inputCol="assembled_features",
+    #     outputCol="standard_scaled_features",
+    #     withStd=True,
+    #     withMean=True
+    # )
 
     minmax_scaler = MinMaxScaler(
-        inputCol="assembled_features",
-        outputCol="minmax_scaled_features",
+        inputCol="features",
+        outputCol="scaled_features",
         min=0.0,
         max=1.0
     )
 
-    standard_model = standard_scaler.fit(assembled_df)
     minmax_model = minmax_scaler.fit(assembled_df)
-    scaled_df = standard_model.transform(assembled_df)
-    scaled_df = minmax_model.transform(scaled_df)
-    scaled_df = scaled_df.withColumnRenamed("assembled_features", "unscaled_features")
-
-    # Print statistics for each scaling method
-    # for feature_col in ["unscaled_features", "standard_scaled_features", "minmax_scaled_features"]:
-    #     summary = scaled_df.select(
-    #         Summarizer.metrics("mean", "std", "min", "max")
-    #         .summary(col(feature_col))
-    #         .alias("summary")
-    #     ).collect()
-
-    #     stats = summary[0]["summary"]
-    #     print(f"\nStatistics for {feature_col}:")
-    #     print(f"Mean: {stats['mean']}")
-    #     print(f"StdDev: {stats['std']}")
-    #     print(f"Min: {stats['min']}")
-    #     print(f"Max: {stats['max']}")
+    scaled_df = minmax_model.transform(assembled_df)
 
     return scaled_df, assembler.getInputCols()
 
