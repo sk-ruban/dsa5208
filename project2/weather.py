@@ -14,7 +14,7 @@ spark = SparkSession.builder \
     .appName("Weather Pressure Prediction") \
     .config("spark.ui.showConsoleProgress", "false") \
     .getOrCreate()
-spark.sparkContext.setLogLevel("WARN")
+spark.sparkContext.setLogLevel("ERROR")
 
 def load_and_preprocess_data():
     """
@@ -25,7 +25,7 @@ def load_and_preprocess_data():
     # USE ONLY IF YOU WANT A SAMPLE (eg. 1000 files) AND COMMENT OUT THE NEXT 3 LINES
     files = spark.sparkContext.binaryFiles("gs://dsa5208-weather/extracted/*.csv") \
                     .map(lambda x: x[0]) \
-                    .takeSample(False, 1000, seed=42)
+                    .takeSample(False, 2000, seed=42)
 
     print(f"\nSelected {len(files)} files")
     selected_columns = ["LATITUDE", "LONGITUDE", "ELEVATION",
@@ -34,7 +34,8 @@ def load_and_preprocess_data():
     df = spark.read.csv(files,
                        header=True,
                        inferSchema=True) \
-             .select(selected_columns)
+             .select(selected_columns) \
+             .cache()
 
     # USE IF WANT TO MODEL ENTIRE DATASET
     # df = spark.read.csv("gs://dsa5208-weather/extracted/*.csv",
@@ -47,13 +48,10 @@ def load_and_preprocess_data():
     # df = df.select([selected_columns]).cache()
 
     initial_count = df.count()
-    print(f"\nInitial row count: {initial_count}")
+    print(f"Initial row count: {initial_count}")
 
     print("\nSample of raw data before parsing:")
     df.show(20, truncate=False)
-
-    print("\nDataframe schema:")
-    df.printSchema()
 
     print("\nParsing columns...")
     df_parsed = df.select(
@@ -108,6 +106,7 @@ def load_and_preprocess_data():
         .alias("sea_level_pressure")
     )
 
+    df.unpersist()
     print("\nSample of parsed data:")
     df_parsed.show(20)
 
@@ -118,7 +117,7 @@ def load_and_preprocess_data():
         print(f"{column}: {null_count} nulls out of {total} ({(null_count/total)*100:.2f}%)")
 
     print("\nRemoving rows with null values...")
-    df_no_nulls = df_parsed.dropna()
+    df_no_nulls = df_parsed.dropna().cache()
 
     rows_after_null_removal = df_no_nulls.count()
     print(f"Rows remaining after null removal: {rows_after_null_removal}")
@@ -137,14 +136,17 @@ def load_and_preprocess_data():
         (col("sea_level_pressure").between(8600, 10900))
     )
 
+    df_no_nulls.unpersist()
     final_count = df_filtered.count()
-    print(f"\nFinal row count after all filtering: {final_count}")
+    print(f"Final row count after all filtering: {final_count}")
 
     return df_filtered
 
 def prepare_features(df):
-   """Prepare feature vectors with MinMax scaling"""
-   assembler = VectorAssembler(
+    """Prepare feature vectors with scaling"""
+    print("\nApplying scaling...")
+
+    assembler = VectorAssembler(
        inputCols=[
            "latitude", "longitude", "elevation",
            "wind_direction", "wind_speed",
@@ -163,7 +165,7 @@ def prepare_features(df):
     #     withStd=True,
     #     withMean=True
     # )
-
+    #
     minmax_scaler = MinMaxScaler(
         inputCol="features",
         outputCol="scaled_features",
@@ -171,58 +173,59 @@ def prepare_features(df):
         max=1.0
     )
 
-    minmax_model = minmax_scaler.fit(assembled_df)
-    scaled_df = minmax_model.transform(assembled_df)
+    pipeline = Pipeline(stages=[assembler, minmax_scaler])
+    model = pipeline.fit(df)
 
-    return scaled_df, assembler.getInputCols()
+    return model.transform(df), assembler.getInputCols()
 
 def train_and_evaluate(scaled_df, feature_names):
-    """Train and evaluate models using different scaling methods with proper regularization"""
+    """Train and evaluate models"""
     print("\nStarting model training and evaluation...")
 
-    # Split data
     train_data, test_data = scaled_df.randomSplit([0.7, 0.3], seed=42)
+    train_data = train_data.cache()
+    test_data = test_data.cache()
     print(f"Training set size: {train_data.count()}")
     print(f"Test set size: {test_data.count()}")
 
-    evaluator = RegressionEvaluator(
-        labelCol="sea_level_pressure",
-        predictionCol="prediction"
-    )
-
-    models = {
-        "Linear Regression": (
-            LinearRegression(standardization=False),
-            ParamGridBuilder()
-                .addGrid(LinearRegression.regParam, [0.01, 0.1, 1.0])
-                .addGrid(LinearRegression.elasticNetParam, [0.0, 0.5, 1.0])
-                .build()
-        ),
-
-        "Random Forest": (
-            RandomForestRegressor(),
-            ParamGridBuilder()
-                .addGrid(RandomForestRegressor.numTrees, [20, 40, 60])
-                .addGrid(RandomForestRegressor.maxDepth, [4, 8, 12])
-                .build()
-        ),
-
-        "Gradient Boosted Trees": (
-            GBTRegressor(),
-            ParamGridBuilder()
-                .addGrid(GBTRegressor.maxDepth, [4, 8])
-                .addGrid(GBTRegressor.maxIter, [20, 40])
-                .build()
+    try:
+        evaluator = RegressionEvaluator(
+            labelCol="sea_level_pressure",
+            predictionCol="prediction"
         )
-    }
 
-    for features_col in ["unscaled_features", "standard_scaled_features", "minmax_scaled_features"]:
-        print(f"\nEvaluating with {features_col}")
+        models = {
+            "Linear Regression": (
+                LinearRegression(standardization=False),
+                ParamGridBuilder()
+                    .addGrid(LinearRegression.regParam, [0.01, 0.1, 1.0])
+                    .addGrid(LinearRegression.elasticNetParam, [0.0, 0.5, 1.0])
+                    .build()
+            ),
+
+            "Random Forest": (
+                RandomForestRegressor(),
+                ParamGridBuilder()
+                    .addGrid(RandomForestRegressor.numTrees, [20, 40, 60])
+                    .addGrid(RandomForestRegressor.maxDepth, [4, 8, 12])
+                    .build()
+            ),
+
+            "Gradient Boosted Trees": (
+                GBTRegressor(),
+                ParamGridBuilder()
+                    .addGrid(GBTRegressor.maxDepth, [4, 8])
+                    .addGrid(GBTRegressor.maxIter, [20, 40])
+                    .build()
+            )
+        }
+
+        print("\nTraining models...")
 
         for model_name, (model, param_grid) in models.items():
             print(f"\nTraining {model_name}...")
 
-            model.setFeaturesCol(features_col)
+            model.setFeaturesCol("scaled_features")
             model.setLabelCol("sea_level_pressure")
 
             cv = CrossValidator(
@@ -248,37 +251,33 @@ def train_and_evaluate(scaled_df, feature_names):
             evaluator.setMetricName("mae")
             test_mae = evaluator.evaluate(test_predictions)
 
-            # Print results
             print(f"\n{model_name} Results:")
             print(f"Train RMSE: {train_rmse:.4f}")
             print(f"Test RMSE: {test_rmse:.4f}")
             print(f"Test R2: {test_r2:.4f}")
             print(f"Test MAE: {test_mae:.4f}")
 
-            # Print best parameters
             if model_name == "Linear Regression":
                 print(f"\nBest Parameters:")
                 print(f"regParam: {best_model.getRegParam()}")
                 print(f"elasticNetParam: {best_model.getElasticNetParam()}")
 
                 coefficients = best_model.coefficients.toArray()
-                if features_col in ["standard_scaled_features", "minmax_scaled_features"]:
-                    print("\nTop 5 most important features by absolute coefficient value:")
-                    coef_pairs = [(name, coef) for name, coef in zip(feature_names, coefficients)]
-                    sorted_coefs = sorted(coef_pairs, key=lambda x: abs(x[1]), reverse=True)
-                    for name, coef in sorted_coefs[:5]:
-                        print(f"{name}: {coef:.4f}")
+                print("\nTop 5 most important features by absolute coefficient value:")
+                coef_pairs = [(name, coef) for name, coef in zip(feature_names, coefficients)]
+                sorted_coefs = sorted(coef_pairs, key=lambda x: abs(x[1]), reverse=True)
+                for name, coef in sorted_coefs[:5]:
+                    print(f"{name}: {coef:.4f}")
 
             elif model_name in ["Random Forest", "Gradient Boosted Trees"]:
                 print(f"\nBest Parameters:")
                 if model_name == "Random Forest":
-                    print(f"numTrees: {best_model.numTrees}")
-                    print(f"maxDepth: {best_model.maxDepth}")
+                   print(f"numTrees: {best_model.getNumTrees()}")
+                   print(f"maxDepth: {best_model.getMaxDepth()}")
                 else:
-                    print(f"maxDepth: {best_model.maxDepth}")
-                    print(f"maxIter: {best_model.maxIter}")
+                   print(f"maxDepth: {best_model.getMaxDepth()}")
+                   print(f"maxIter: {best_model.getMaxIter()}")
 
-                # Feature Importance
                 if hasattr(best_model, 'featureImportances'):
                     print("\nTop 5 features by importance:")
                     importances = best_model.featureImportances
@@ -287,8 +286,15 @@ def train_and_evaluate(scaled_df, feature_names):
                     for feat, imp in sorted_imp:
                         print(f"{feat}: {imp:.4f}")
 
+    except Exception as e:
+        print(f"Error during model training: {str(e)}")
+        raise
+    finally:
+        print("\nCleaning up cached DataFrames...")
+        train_data.unpersist()
+        test_data.unpersist()
+
 def main():
-    print("Starting weather prediction model...")
     df = load_and_preprocess_data()
     scaled_df, feature_names = prepare_features(df)
     train_and_evaluate(scaled_df, feature_names)
