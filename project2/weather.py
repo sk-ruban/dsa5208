@@ -23,29 +23,29 @@ def load_and_preprocess_data():
     print("Starting data preprocessing...")
 
     # USE ONLY IF YOU WANT A SAMPLE (eg. 1000 files) AND COMMENT OUT THE NEXT 3 LINES
-    files = spark.sparkContext.binaryFiles("gs://dsa5208-weather/extracted/*.csv") \
-                    .map(lambda x: x[0]) \
-                    .takeSample(False, 2000, seed=42)
+    # files = spark.sparkContext.binaryFiles("gs://dsa5208-weather/extracted/*.csv") \
+    #                 .map(lambda x: x[0]) \
+    #                 .takeSample(False, 1000, seed=42)
 
-    print(f"\nSelected {len(files)} files")
-    selected_columns = ["LATITUDE", "LONGITUDE", "ELEVATION",
-                       "WND", "CIG", "VIS", "TMP", "DEW", "SLP"]
-
-    df = spark.read.csv(files,
-                       header=True,
-                       inferSchema=True) \
-             .select(selected_columns) \
-             .cache()
-
-    # USE IF WANT TO MODEL ENTIRE DATASET
-    # df = spark.read.csv("gs://dsa5208-weather/extracted/*.csv",
-    #                     header=True,
-    #                     inferSchema=True)
-
+    # print(f"\nSelected {len(files)} files")
     # selected_columns = ["LATITUDE", "LONGITUDE", "ELEVATION",
     #                    "WND", "CIG", "VIS", "TMP", "DEW", "SLP"]
 
-    # df = df.select([selected_columns]).cache()
+    # df = spark.read.csv(files,
+    #                    header=True,
+    #                    inferSchema=True) \
+    #          .select(selected_columns) \
+    #          .cache()
+
+    # USE IF WANT TO MODEL ENTIRE DATASET
+    df = spark.read.csv("gs://dsa5208-weather/extracted/*.csv",
+                        header=True,
+                        inferSchema=True)
+
+    selected_columns = ["LATITUDE", "LONGITUDE", "ELEVATION",
+                       "WND", "CIG", "VIS", "TMP", "DEW", "SLP"]
+
+    df = df.select(selected_columns).cache()
 
     initial_count = df.count()
     print(f"Initial row count: {initial_count}")
@@ -214,8 +214,8 @@ def train_and_evaluate(scaled_df, feature_names):
             "Gradient Boosted Trees": (
                 GBTRegressor(),
                 ParamGridBuilder()
-                    .addGrid(GBTRegressor.maxDepth, [4, 8])
-                    .addGrid(GBTRegressor.maxIter, [20, 40])
+                    .addGrid(GBTRegressor.maxDepth, [4, 8, 12])
+                    .addGrid(GBTRegressor.maxIter, [20, 40, 60])
                     .build()
             )
         }
@@ -272,11 +272,11 @@ def train_and_evaluate(scaled_df, feature_names):
             elif model_name in ["Random Forest", "Gradient Boosted Trees"]:
                 print(f"\nBest Parameters:")
                 if model_name == "Random Forest":
-                   print(f"numTrees: {best_model.getNumTrees()}")
-                   print(f"maxDepth: {best_model.getMaxDepth()}")
+                    print(f"numTrees: {best_model._java_obj.getNumTrees()}")
+                    print(f"maxDepth: {best_model._java_obj.getMaxDepth()}")
                 else:
-                   print(f"maxDepth: {best_model.getMaxDepth()}")
-                   print(f"maxIter: {best_model.getMaxIter()}")
+                    print(f"maxDepth: {best_model._java_obj.getMaxDepth()}")
+                    print(f"maxIter: {best_model._java_obj.getMaxIter()}")
 
                 if hasattr(best_model, 'featureImportances'):
                     print("\nTop 5 features by importance:")
