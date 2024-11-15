@@ -12,36 +12,36 @@ gs://dsa5208-weather/
 ```
 
 ## Models Implemented & Results
-**Note: these results are for the 1000 Files Sample, Not the entire >14000 Files!**
+**Note: these results are for entire data sample (>14000 files)**
 1. Linear Regression
-   - Train RMSE: 86.3446
-   - Test RMSE: 86.3267
-   - Test R2: 0.0881
-   - Test MAE: 63.3234
+   - Train RMSE: 86.0902
+   - Test RMSE: 86.1117
+   - Test R2: 0.0998
+   - Test MAE: 62.8752
    - Best Parameters:
      - regParam: 0.0
      - elasticNetParam: 0.0
-   - Top Features: wind_speed (-413.15), air_temp (-64.16), dew_point (-48.95)
+   - Top Features: wind_speed (-550.39), air_temp (-96.63), dew_point (-99.84)
 
 2. Random Forest
-   - Train RMSE: 81.5404
-   - Test RMSE: 81.4562
-   - Test R2: 0.1881
-   - Test MAE: 59.5847
+   - Train RMSE: 82.3007
+   - Test RMSE: 82.3089
+   - Test R2: 0.1776
+   - Test MAE: 59.7790
    - Best Parameters:
      - numTrees: 20
      - maxDepth: 5
-   - Top Features: latitude (0.28), air_temp (0.17), wind_speed (0.13)
+   - Top Features: latitude (0.22), air_temp (0.19), ceiling_height (0.16)
 
 3. Gradient Boosted Trees
-   - Train RMSE: 77.3908
-   - Test RMSE: 77.3523
-   - Test R2: 0.2678
-   - Test MAE: 55.9982
+   - Train RMSE: 78.6997
+   - Test RMSE: 78.6995
+   - Test R2: 0.2481
+   - Test MAE: 56.7953
    - Best Parameters:
      - maxDepth: 5
      - maxIter: 20
-   - Top Features: latitude (0.20), dew_point (0.13), air_temp (0.13)
+   - Top Features: latitude (0.20), air_temp (0.16), longitude (0.16)
 
 ## Usage
 Run directly from terminal **(Run without SSHing)**:

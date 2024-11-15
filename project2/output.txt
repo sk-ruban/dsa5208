@@ -1,0 +1,159 @@
+24/11/14 20:03:46 INFO SparkEnv: Registering MapOutputTracker
+24/11/14 20:03:46 INFO SparkEnv: Registering BlockManagerMaster
+24/11/14 20:03:46 INFO SparkEnv: Registering BlockManagerMasterHeartbeat
+24/11/14 20:03:46 INFO SparkEnv: Registering OutputCommitCoordinator
+24/11/14 20:03:48 INFO DataprocSparkPlugin: Registered 128 driver metrics
+24/11/14 20:03:49 INFO DefaultNoHARMFailoverProxyProvider: Connecting to ResourceManager at ml-cluster-m.asia-east1-a.c.weather-prediction-441015.internal./10.140.0.5:8032
+24/11/14 20:03:49 INFO AHSProxy: Connecting to Application History server at ml-cluster-m.asia-east1-a.c.weather-prediction-441015.internal./10.140.0.5:10200
+24/11/14 20:03:49 INFO Configuration: resource-types.xml not found
+24/11/14 20:03:49 INFO ResourceUtils: Unable to find 'resource-types.xml'.
+24/11/14 20:03:50 INFO YarnClientImpl: Submitted application application_1731553585130_0027
+24/11/14 20:03:51 INFO DefaultNoHARMFailoverProxyProvider: Connecting to ResourceManager at ml-cluster-m.asia-east1-a.c.weather-prediction-441015.internal./10.140.0.5:8030
+24/11/14 20:03:53 INFO GoogleCloudStorageImpl: Ignoring exception of type GoogleJsonResponseException; verified object already exists with desired state.
+Starting data preprocessing...
+Initial row count: 130531842
+
+Sample of raw data before parsing:
++--------+---------+---------+--------------+-----------+------------+-------+-------+-------+
+|LATITUDE|LONGITUDE|ELEVATION|WND           |CIG        |VIS         |TMP    |DEW    |SLP    |
++--------+---------+---------+--------------+-----------+------------+-------+-------+-------+
+|71.3213 |-156.611 |4.6      |999,9,R,0005,1|99999,9,9,N|999999,9,9,9|-0175,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0175,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0175,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0175,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0175,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0175,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0175,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,R,0004,1|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0174,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0173,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0173,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0173,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0173,1|+9999,9|99999,9|
+|71.3213 |-156.611 |4.6      |999,9,9,9999,9|99999,9,9,N|999999,9,9,9|-0172,1|+9999,9|99999,9|
++--------+---------+---------+--------------+-----------+------------+-------+-------+-------+
+only showing top 20 rows
+
+
+Parsing columns...
+
+Sample of parsed data:
++--------+---------+---------+--------------+----------+--------------+----------+--------+---------+------------------+
+|latitude|longitude|elevation|wind_direction|wind_speed|ceiling_height|visibility|air_temp|dew_point|sea_level_pressure|
++--------+---------+---------+--------------+----------+--------------+----------+--------+---------+------------------+
+| 71.3213| -156.611|      4.6|          null|       5.0|          null|      null|  -175.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -175.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -175.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -175.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -175.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -175.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -175.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|       4.0|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -174.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -173.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -173.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -173.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -173.0|     null|              null|
+| 71.3213| -156.611|      4.6|          null|      null|          null|      null|  -172.0|     null|              null|
++--------+---------+---------+--------------+----------+--------------+----------+--------+---------+------------------+
+only showing top 20 rows
+
+
+Null counts after parsing:
+latitude: 0 nulls out of 130531842 (0.00%)
+longitude: 0 nulls out of 130531842 (0.00%)
+elevation: 0 nulls out of 130531842 (0.00%)
+wind_direction: 37143661 nulls out of 130531842 (28.46%)
+wind_speed: 18615382 nulls out of 130531842 (14.26%)
+ceiling_height: 68297483 nulls out of 130531842 (52.32%)
+visibility: 44706860 nulls out of 130531842 (34.25%)
+air_temp: 3440078 nulls out of 130531842 (2.64%)
+dew_point: 22730107 nulls out of 130531842 (17.41%)
+sea_level_pressure: 78046337 nulls out of 130531842 (59.79%)
+
+Removing rows with null values...
+Rows remaining after null removal: 18474434
+
+Applying valid range filters...
+Final row count after all filtering: 18471526
+
+Applying scaling...
+
+Starting model training and evaluation...
+Training set size: 12930857
+Test set size: 5540669
+
+Training models...
+
+Training Linear Regression...
+
+Linear Regression Results:
+Train RMSE: 86.0902
+Test RMSE: 86.1117
+Test R2: 0.0998
+Test MAE: 62.8752
+
+Best Parameters:
+regParam: 0.0
+elasticNetParam: 0.0
+
+Top 5 most important features by absolute coefficient value:
+wind_speed: -550.3925
+dew_point: -99.8408
+air_temp: -96.6306
+visibility: 38.0419
+longitude: -33.4259
+
+Training Random Forest...
+
+Random Forest Results:
+Train RMSE: 82.3007
+Test RMSE: 82.3089
+Test R2: 0.1776
+Test MAE: 59.7790
+
+Best Parameters:
+numTrees: 20
+maxDepth: 5
+
+Top 5 features by importance:
+latitude: 0.2197
+air_temp: 0.1860
+ceiling_height: 0.1615
+dew_point: 0.1571
+wind_speed: 0.1482
+
+Training Gradient Boosted Trees...
+
+Gradient Boosted Trees Results:
+Train RMSE: 78.6997
+Test RMSE: 78.6995
+Test R2: 0.2481
+Test MAE: 56.7953
+
+Best Parameters:
+maxDepth: 5
+maxIter: 20
+
+Top 5 features by importance:
+latitude: 0.2162
+air_temp: 0.1648
+longitude: 0.1610
+dew_point: 0.1163
+wind_speed: 0.0972
+
+Cleaning up cached DataFrames...
+
+Processing complete!
